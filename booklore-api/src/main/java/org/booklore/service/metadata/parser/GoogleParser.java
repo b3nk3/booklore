@@ -1,18 +1,19 @@
 package org.booklore.service.metadata.parser;
 
+import lombok.extern.slf4j.Slf4j;
 import org.booklore.model.dto.Book;
 import org.booklore.model.dto.BookMetadata;
 import org.booklore.model.dto.request.FetchMetadataRequest;
 import org.booklore.model.dto.response.GoogleBooksApiResponse;
+import org.booklore.model.dto.settings.MetadataProviderSettings;
 import org.booklore.model.enums.MetadataProvider;
 import org.booklore.service.appsettings.AppSettingService;
 import org.booklore.util.BookUtils;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Jsoup;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.UriComponentsBuilder;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.net.URI;
@@ -579,17 +580,23 @@ public class GoogleParser implements BookParser {
     }
 
     private String getApiUrl() {
-        String language = appSettingService.getAppSettings().getMetadataProviderSettings().getGoogle().getLanguage();
+        MetadataProviderSettings.Google googleSettings = appSettingService.getAppSettings()
+                .getMetadataProviderSettings().getGoogle();
 
-        if (language == null || language.isEmpty()) {
-            return GOOGLE_BOOKS_API_URL;
+        String language = googleSettings.getLanguage();
+        String apiKey = googleSettings.getApiKey();
+
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(GOOGLE_BOOKS_API_URL);
+
+        if (language != null && !language.isEmpty()) {
+            builder.queryParam("langRestrict", language);
         }
 
-        return UriComponentsBuilder.fromUriString(GOOGLE_BOOKS_API_URL)
-            .queryParam("langRestrict", language)
-            .build()
-            .toUri()
-            .toString();
+        if (apiKey != null && !apiKey.isBlank()) {
+            builder.queryParam("key", apiKey);
+        }
+
+        return builder.build().toUri().toString();
     }
 
     private void waitForRateLimit() {

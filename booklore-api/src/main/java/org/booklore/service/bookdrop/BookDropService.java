@@ -1,5 +1,7 @@
 package org.booklore.service.bookdrop;
 
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.booklore.config.AppProperties;
 import org.booklore.exception.ApiError;
 import org.booklore.mapper.BookdropFileMapper;
@@ -32,14 +34,12 @@ import org.booklore.service.kobo.KoboAutoShelfService;
 import org.booklore.service.metadata.MetadataRefreshService;
 import org.booklore.service.monitoring.MonitoringRegistrationService;
 import org.booklore.util.FileUtils;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.AllArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.File;
 import java.io.IOException;
@@ -48,12 +48,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
-import java.util.Comparator;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -382,6 +377,15 @@ public class BookDropService {
                 .findFirst()
                 .orElseThrow(() -> ApiError.INVALID_LIBRARY_PATH.createException(libraryId));
 
+        BookFileType fileType = BookFileExtension.fromFileName(bookdropFile.getFileName())
+                .map(BookFileExtension::getType)
+                .orElseThrow(() -> ApiError.INVALID_FILE_FORMAT.createException("Unsupported file extension"));
+
+        if (!isFormatAllowed(library, fileType)) {
+            return failureResult(bookdropFile.getFileName(),
+                    "Format '" + fileType.name() + "' is not allowed in library '" + library.getName() + "'");
+        }
+
         String filePattern = fileMovingHelper.getFileNamingPattern(library);
         Path source = Path.of(bookdropFile.getFilePath());
         Path target = fileMovingHelper.generateNewFilePath(path.getPath(), metadata, filePattern, bookdropFile.getFilePath());
@@ -623,6 +627,11 @@ public class BookDropService {
                 .message(message)
                 .success(false)
                 .build();
+    }
+
+    private boolean isFormatAllowed(LibraryEntity library, BookFileType fileType) {
+        var allowedFormats = library.getAllowedFormats();
+        return allowedFormats == null || allowedFormats.isEmpty() || allowedFormats.contains(fileType);
     }
 
     private record FileProcessingContext(Long libraryId, Long pathId, BookMetadata metadata) {

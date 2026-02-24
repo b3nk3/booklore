@@ -29,6 +29,12 @@ public class BookMetadata {
     private String isbn10;
     private Integer pageCount;
     private String language;
+    private String narrator;
+    private Boolean abridged;
+
+    private AudiobookMetadata audiobookMetadata;
+    private ComicMetadata comicMetadata;
+
     private String asin;
     private Double amazonRating;
     private Integer amazonReviewCount;
@@ -48,16 +54,22 @@ public class BookMetadata {
     private String lubimyczytacId;
     private String ranobedbId;
     private Double ranobedbRating;
+    private String audibleId;
+    private Double audibleRating;
+    private Integer audibleReviewCount;
     private String externalUrl;
     private Instant coverUpdatedOn;
+    private Instant audiobookCoverUpdatedOn;
     private Set<String> authors;
-    @Singular
     private Set<String> categories;
     private Set<String> moods;
     private Set<String> tags;
     private MetadataProvider provider;
     private String thumbnailUrl;
     private List<BookReview> bookReviews;
+    private Double rating;
+
+    private Boolean allMetadataLocked;
 
     private Boolean titleLocked;
     private Boolean subtitleLocked;
@@ -90,11 +102,22 @@ public class BookMetadata {
     private Boolean lubimyczytacRatingLocked;
     private Boolean ranobedbIdLocked;
     private Boolean ranobedbRatingLocked;
+    private Boolean audibleIdLocked;
+    private Boolean audibleRatingLocked;
+    private Boolean audibleReviewCountLocked;
     private Boolean externalUrlLocked;
     private Boolean coverLocked;
+    private Boolean audiobookCoverLocked;
     private Boolean authorsLocked;
     private Boolean categoriesLocked;
     private Boolean moodsLocked;
     private Boolean tagsLocked;
     private Boolean reviewsLocked;
+    private Boolean narratorLocked;
+    private Boolean abridgedLocked;
+
+    private Integer ageRating;
+    private String contentRating;
+    private Boolean ageRatingLocked;
+    private Boolean contentRatingLocked;
 }

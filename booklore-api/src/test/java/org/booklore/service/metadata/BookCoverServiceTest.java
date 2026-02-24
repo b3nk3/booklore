@@ -61,7 +61,10 @@ class BookCoverServiceTest {
     private BookEntity mockBookEntity(Long id, boolean coverLocked) {
         BookMetadataEntity metadata = new BookMetadataEntity();
         metadata.setTitle("Test Title");
-        metadata.setAuthors(Set.of(new AuthorEntity(1L, "Author Name", null)));
+        AuthorEntity author = new AuthorEntity();
+        author.setId(1L);
+        author.setName("Author Name");
+        metadata.setAuthors(Set.of(author));
         metadata.setCoverLocked(coverLocked);
         BookEntity book = new BookEntity();
         book.setId(id);
@@ -188,24 +191,22 @@ class BookCoverServiceTest {
     @Test
     void regenerateCover_success() {
         BookEntity book = mockBookEntity(7L, false);
-        when(bookRepository.findById(7L)).thenReturn(Optional.of(book));
-        when(bookRepository.findAllWithMetadataByIds(any())).thenReturn(List.of(book));
+        when(bookRepository.findByIdWithBookFiles(7L)).thenReturn(Optional.of(book));
         BookFileProcessor processor = mock(BookFileProcessor.class);
         when(processorRegistry.getProcessorOrThrow(any())).thenReturn(processor);
-        when(processor.generateCover(any())).thenReturn(true);
+        when(processor.generateCover(any(BookEntity.class), any(BookFileEntity.class))).thenReturn(true);
         when(bookRepository.save(any())).thenReturn(book);
 
         bookCoverService.regenerateCover(7L);
 
-        verify(processor).generateCover(book);
+        verify(processor).generateCover(eq(book), any(BookFileEntity.class));
         verify(bookRepository).save(book);
     }
 
     @Test
     void regenerateCover_coverLocked_throws() {
         BookEntity book = mockBookEntity(8L, true);
-        when(bookRepository.findById(8L)).thenReturn(Optional.of(book));
-        when(bookRepository.findAllWithMetadataByIds(any())).thenReturn(List.of(book));
+        when(bookRepository.findByIdWithBookFiles(8L)).thenReturn(Optional.of(book));
         assertThatThrownBy(() -> bookCoverService.regenerateCover(8L))
                 .isInstanceOf(ApiError.METADATA_LOCKED.createException().getClass());
     }
@@ -281,7 +282,7 @@ class BookCoverServiceTest {
         MetadataPersistenceSettings settings = new MetadataPersistenceSettings();
         settings.setSaveToOriginalFile(saveToOriginalFileObj);
         settings.setConvertCbrCb7ToCbz(convertCbrCb7ToCbz);
-        return new org.booklore.model.dto.settings.AppSettings() {
+        return new AppSettings() {
             @Override
             public MetadataPersistenceSettings getMetadataPersistenceSettings() {
                 return settings;

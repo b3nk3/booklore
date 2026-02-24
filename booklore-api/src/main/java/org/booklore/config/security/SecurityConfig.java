@@ -1,6 +1,5 @@
 package org.booklore.config.security;
 
-import org.booklore.config.AppProperties;
 import org.booklore.config.security.filter.*;
 import org.booklore.config.security.service.OpdsUserDetailsService;
 import jakarta.servlet.DispatcherType;
@@ -35,13 +34,6 @@ public class SecurityConfig {
 
     private final OpdsUserDetailsService opdsUserDetailsService;
     private final DualJwtAuthenticationFilter dualJwtAuthenticationFilter;
-    private final AppProperties appProperties;
-
-    private static final String[] SWAGGER_ENDPOINTS = {
-            "/api/v1/swagger-ui.html",
-            "/api/v1/swagger-ui/**",
-            "/api/v1/api-docs/**"
-    };
 
     private static final String[] COMMON_PUBLIC_ENDPOINTS = {
             "/ws/**",                  // WebSocket connections (auth handled in WebSocketAuthInterceptor)
@@ -200,10 +192,8 @@ public class SecurityConfig {
     @Order(8)
     public SecurityFilterChain jwtApiSecurityChain(HttpSecurity http) throws Exception {
         List<String> publicEndpoints = new ArrayList<>(Arrays.asList(COMMON_PUBLIC_ENDPOINTS));
-        if (appProperties.getSwagger().isEnabled()) {
-            publicEndpoints.addAll(Arrays.asList(SWAGGER_ENDPOINTS));
-        }
         http
+                .securityMatcher("/api/**", "/komga/**", "/ws/**")
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -213,6 +203,17 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(dualJwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+        return http.build();
+    }
+
+    @Bean
+    @Order(9)
+    public SecurityFilterChain staticResourcesSecurityChain(HttpSecurity http) throws Exception {
+        http
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .headers(headers -> headers.frameOptions(HeadersConfigurer.FrameOptionsConfig::sameOrigin))
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
         return http.build();
     }
 
@@ -228,8 +229,8 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOriginPatterns(List.of("*"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Cache-Control", "Content-Type"));
-        configuration.setExposedHeaders(List.of("Content-Disposition"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Cache-Control", "Content-Type", "Range", "If-None-Match"));
+        configuration.setExposedHeaders(List.of("Content-Disposition", "Accept-Ranges", "Content-Range", "Content-Length", "ETag", "Date"));
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

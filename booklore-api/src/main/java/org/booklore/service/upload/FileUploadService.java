@@ -34,6 +34,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.Optional;
+import org.booklore.model.enums.AuditAction;
+import org.booklore.service.audit.AuditService;
 
 @RequiredArgsConstructor
 @Service
@@ -54,6 +56,7 @@ public class FileUploadService {
     private final AdditionalFileMapper additionalFileMapper;
     private final FileMovingHelper fileMovingHelper;
     private final MonitoringRegistrationService monitoringRegistrationService;
+    private final AuditService auditService;
 
     public void uploadFile(MultipartFile file, long libraryId, long pathId) {
         validateFile(file);
@@ -61,13 +64,13 @@ public class FileUploadService {
         final LibraryEntity libraryEntity = findLibraryById(libraryId);
         final LibraryPathEntity libraryPathEntity = findLibraryPathById(libraryEntity, pathId);
         final String originalFileName = getValidatedFileName(file);
+        final BookFileExtension fileExtension = getFileExtension(originalFileName);
+        validateAllowedFormat(libraryEntity, fileExtension.getType());
 
         Path tempPath = null;
         try {
             tempPath = createTempFile(UPLOAD_TEMP_PREFIX, originalFileName);
             file.transferTo(tempPath);
-
-            final BookFileExtension fileExtension = getFileExtension(originalFileName);
             final BookMetadata metadata = extractMetadata(fileExtension, tempPath.toFile(), originalFileName);
             final String uploadPattern = fileMovingHelper.getFileNamingPattern(libraryEntity);
 
@@ -78,6 +81,7 @@ public class FileUploadService {
             moveFileToFinalLocation(tempPath, finalPath);
 
             log.info("File uploaded to final location: {}", finalPath);
+            auditService.log(AuditAction.BOOK_UPLOADED, "Library", libraryId, "Uploaded file: " + originalFileName);
 
         } catch (IOException e) {
             log.error("Failed to upload file: {}", originalFileName, e);
@@ -357,6 +361,13 @@ public class FileUploadService {
         final int maxSizeMb = appSettingService.getAppSettings().getMaxFileUploadSizeInMb();
         if (file.getSize() > maxSizeMb * MB_TO_BYTES_MULTIPLIER) {
             throw ApiError.FILE_TOO_LARGE.createException(maxSizeMb);
+        }
+    }
+
+    private void validateAllowedFormat(LibraryEntity library, BookFileType fileType) {
+        var allowedFormats = library.getAllowedFormats();
+        if (allowedFormats != null && !allowedFormats.isEmpty() && !allowedFormats.contains(fileType)) {
+            throw ApiError.FORMAT_NOT_ALLOWED.createException(fileType.name(), library.getName());
         }
     }
 }

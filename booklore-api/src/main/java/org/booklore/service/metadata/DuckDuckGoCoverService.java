@@ -1,15 +1,15 @@
 package org.booklore.service.metadata;
 
-import org.booklore.model.dto.CoverImage;
-import org.booklore.model.dto.request.CoverFetchRequest;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.booklore.model.dto.CoverImage;
+import org.booklore.model.dto.request.CoverFetchRequest;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.net.URLEncoder;
@@ -65,14 +65,14 @@ public class DuckDuckGoCoverService implements BookCoverProvider {
     public List<CoverImage> getCovers(CoverFetchRequest request) {
         String title = request.getTitle();
         String author = request.getAuthor();
-        boolean squareCover = request.isSquareCover();
-        String bookType = squareCover ? "audiobook" : "book";
+        boolean isAudiobook = "audiobook".equalsIgnoreCase(request.getCoverType());
+        String bookType = isAudiobook ? "audiobook" : "book";
         String searchTerm = (author != null && !author.isEmpty())
                 ? title + " " + author + " " + bookType
                 : title + " " + bookType;
 
-        String searchParams = squareCover ? SEARCH_PARAMS_SQUARE : SEARCH_PARAMS_TALL;
-        String jsonParams = squareCover ? JSON_PARAMS_SQUARE : JSON_PARAMS_TALL;
+        String searchParams = isAudiobook ? SEARCH_PARAMS_SQUARE : SEARCH_PARAMS_TALL;
+        String jsonParams = isAudiobook ? JSON_PARAMS_SQUARE : JSON_PARAMS_TALL;
 
         String encodedSiteQuery = URLEncoder.encode(searchTerm, StandardCharsets.UTF_8);
         String siteUrl = SEARCH_BASE_URL + encodedSiteQuery + SITE_FILTER + searchParams;
@@ -88,7 +88,7 @@ public class DuckDuckGoCoverService implements BookCoverProvider {
         String siteSearchToken = siteMatcher.group(1);
         List<CoverImage> siteFilteredImages = fetchImagesFromApi(searchTerm + " (site:amazon.com OR site:goodreads.com)", siteSearchToken, cookies, siteUrl, jsonParams);
         siteFilteredImages.removeIf(dto -> dto.getWidth() < 350);
-        if (squareCover) {
+        if (isAudiobook) {
             siteFilteredImages.removeIf(dto -> !isApproximatelySquare(dto.getWidth(), dto.getHeight()));
         } else {
             siteFilteredImages.removeIf(dto -> dto.getWidth() >= dto.getHeight());
@@ -108,7 +108,7 @@ public class DuckDuckGoCoverService implements BookCoverProvider {
             String generalSearchToken = generalMatcher.group(1);
             generalBookImages = fetchImagesFromApi(searchTerm, generalSearchToken, generalCookies, generalUrl, jsonParams);
             generalBookImages.removeIf(dto -> dto.getWidth() < 350);
-            if (squareCover) {
+            if (isAudiobook) {
                 generalBookImages.removeIf(dto -> !isApproximatelySquare(dto.getWidth(), dto.getHeight()));
             } else {
                 generalBookImages.removeIf(dto -> dto.getWidth() >= dto.getHeight());
@@ -134,6 +134,32 @@ public class DuckDuckGoCoverService implements BookCoverProvider {
         }
 
         return allImages;
+    }
+
+    public List<CoverImage> searchImages(String searchTerm) {
+        String searchParams = "&iar=images";
+        String jsonParams = "&iar=images";
+
+        String encodedQuery = URLEncoder.encode(searchTerm, StandardCharsets.UTF_8);
+        String searchUrl = SEARCH_BASE_URL + encodedQuery + searchParams;
+        Connection.Response response = getResponse(searchUrl);
+        Document doc = parseResponse(response);
+        Map<String, String> cookies = response.cookies();
+        Pattern tokenPattern = Pattern.compile("vqd=\"(\\d+-\\d+)\"");
+        Matcher matcher = tokenPattern.matcher(doc.html());
+        if (!matcher.find()) {
+            log.error("Could not find search token for image search");
+            return Collections.emptyList();
+        }
+        String searchToken = matcher.group(1);
+        List<CoverImage> images = fetchImagesFromApi(searchTerm, searchToken, cookies, searchUrl, jsonParams);
+
+        for (int i = 0; i < images.size(); i++) {
+            CoverImage img = images.get(i);
+            images.set(i, new CoverImage(img.getUrl(), img.getWidth(), img.getHeight(), i + 1));
+        }
+
+        return images;
     }
 
     private List<CoverImage> fetchImagesFromApi(String query, String searchToken, Map<String, String> cookies, String referrerUrl, String jsonParams) {

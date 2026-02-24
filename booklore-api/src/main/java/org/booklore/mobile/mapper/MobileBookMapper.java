@@ -29,6 +29,8 @@ public interface MobileBookMapper {
     @Mapping(target = "libraryId", source = "book.library.id")
     @Mapping(target = "addedOn", source = "book.addedOn")
     @Mapping(target = "lastReadTime", source = "progress.lastReadTime")
+    @Mapping(target = "readProgress", source = "progress", qualifiedByName = "mapReadProgress")
+    @Mapping(target = "primaryFileType", source = "book", qualifiedByName = "mapPrimaryFileType")
     MobileBookSummary toSummary(BookEntity book, UserBookProgressEntity progress);
 
     @Mapping(target = "id", source = "book.id")
@@ -125,6 +127,15 @@ public interface MobileBookMapper {
         }
         if (progress.getKoboProgressPercent() != null) {
             return progress.getKoboProgressPercent();
+        }
+        if (progress.getEpubProgressPercent() != null) {
+            return progress.getEpubProgressPercent();
+        }
+        if (progress.getPdfProgressPercent() != null) {
+            return progress.getPdfProgressPercent();
+        }
+        if (progress.getCbxProgressPercent() != null) {
+            return progress.getCbxProgressPercent();
         }
         return null;
     }

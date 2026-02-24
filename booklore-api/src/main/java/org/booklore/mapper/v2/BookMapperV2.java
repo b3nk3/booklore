@@ -1,14 +1,14 @@
 package org.booklore.mapper.v2;
 
+import org.booklore.mapper.ComicMetadataMapper;
 import org.booklore.mapper.ShelfMapper;
-import org.booklore.model.dto.Book;
-import org.booklore.model.dto.BookFile;
-import org.booklore.model.dto.BookMetadata;
-import org.booklore.model.dto.LibraryPath;
+import org.booklore.model.dto.*;
 import org.booklore.model.entity.*;
 import org.booklore.model.enums.BookFileType;
+import org.mapstruct.AfterMapping;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
+import org.mapstruct.MappingTarget;
 import org.mapstruct.Named;
 import org.mapstruct.ReportingPolicy;
 
@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-@Mapper(componentModel = "spring", uses = ShelfMapper.class, unmappedTargetPolicy = ReportingPolicy.IGNORE)
+@Mapper(componentModel = "spring", uses = {ShelfMapper.class, ComicMetadataMapper.class}, unmappedTargetPolicy = ReportingPolicy.IGNORE)
 public interface BookMapperV2 {
 
     @Mapping(source = "library.id", target = "libraryId")
@@ -34,6 +34,57 @@ public interface BookMapperV2 {
     @Mapping(target = "moods", source = "moods", qualifiedByName = "mapMoods")
     @Mapping(target = "tags", source = "tags", qualifiedByName = "mapTags")
     BookMetadata mapMetadata(BookMetadataEntity metadataEntity);
+
+    @AfterMapping
+    default void mapAudiobookMetadata(BookEntity bookEntity, @MappingTarget Book book) {
+        if (book.getMetadata() == null) {
+            return;
+        }
+
+        BookMetadataEntity metadataEntity = bookEntity.getMetadata();
+        BookMetadata metadata = book.getMetadata();
+
+        if (metadataEntity != null) {
+            metadata.setNarrator(metadataEntity.getNarrator());
+            metadata.setAbridged(metadataEntity.getAbridged());
+            metadata.setNarratorLocked(metadataEntity.getNarratorLocked());
+            metadata.setAbridgedLocked(metadataEntity.getAbridgedLocked());
+        }
+
+        BookFileEntity audiobookFile = bookEntity.getBookFiles() != null
+                ? bookEntity.getBookFiles().stream()
+                    .filter(bf -> bf.getBookType() == BookFileType.AUDIOBOOK && bf.isBook())
+                    .findFirst()
+                    .orElse(null)
+                : null;
+
+        if (audiobookFile != null && audiobookFile.getDurationSeconds() != null) {
+            List<AudiobookMetadata.ChapterInfo> chapters = null;
+            if (audiobookFile.getChapters() != null) {
+                chapters = audiobookFile.getChapters().stream()
+                        .map(ch -> AudiobookMetadata.ChapterInfo.builder()
+                                .index(ch.getIndex())
+                                .title(ch.getTitle())
+                                .startTimeMs(ch.getStartTimeMs())
+                                .endTimeMs(ch.getEndTimeMs())
+                                .durationMs(ch.getDurationMs())
+                                .build())
+                        .toList();
+            }
+
+            metadata.setAudiobookMetadata(
+                    AudiobookMetadata.builder()
+                            .durationSeconds(audiobookFile.getDurationSeconds())
+                            .bitrate(audiobookFile.getBitrate())
+                            .sampleRate(audiobookFile.getSampleRate())
+                            .channels(audiobookFile.getChannels())
+                            .codec(audiobookFile.getCodec())
+                            .chapterCount(audiobookFile.getChapterCount())
+                            .chapters(chapters)
+                            .build()
+            );
+        }
+    }
 
     @Named("mapAuthors")
     default Set<String> mapAuthors(Set<AuthorEntity> authors) {

@@ -4,6 +4,7 @@ import org.booklore.mapper.BookMapper;
 import org.booklore.model.dto.BookMetadata;
 import org.booklore.model.dto.settings.LibraryFile;
 import org.booklore.model.entity.BookEntity;
+import org.booklore.model.entity.BookFileEntity;
 import org.booklore.model.entity.BookMetadataEntity;
 import org.booklore.model.enums.BookFileType;
 import org.booklore.repository.BookAdditionalFileRepository;
@@ -11,6 +12,7 @@ import org.booklore.repository.BookRepository;
 import org.booklore.service.book.BookCreatorService;
 import org.booklore.service.metadata.MetadataMatchService;
 import org.booklore.service.metadata.extractor.Fb2MetadataExtractor;
+import org.booklore.service.metadata.sidecar.SidecarMetadataWriter;
 import org.booklore.util.BookCoverUtils;
 import org.booklore.util.FileService;
 import org.booklore.util.FileUtils;
@@ -37,8 +39,9 @@ public class Fb2Processor extends AbstractFileProcessor implements BookFileProce
                         BookMapper bookMapper,
                         FileService fileService,
                         MetadataMatchService metadataMatchService,
+                        SidecarMetadataWriter sidecarMetadataWriter,
                         Fb2MetadataExtractor fb2MetadataExtractor) {
-        super(bookRepository, bookAdditionalFileRepository, bookCreatorService, bookMapper, fileService, metadataMatchService);
+        super(bookRepository, bookAdditionalFileRepository, bookCreatorService, bookMapper, fileService, metadataMatchService, sidecarMetadataWriter);
         this.fb2MetadataExtractor = fb2MetadataExtractor;
     }
 
@@ -55,12 +58,17 @@ public class Fb2Processor extends AbstractFileProcessor implements BookFileProce
 
     @Override
     public boolean generateCover(BookEntity bookEntity) {
+        return generateCover(bookEntity, bookEntity.getPrimaryBookFile());
+    }
+
+    @Override
+    public boolean generateCover(BookEntity bookEntity, BookFileEntity bookFile) {
         try {
-            File fb2File = new File(FileUtils.getBookFullPath(bookEntity));
+            File fb2File = new File(FileUtils.getBookFullPath(bookEntity, bookFile));
             byte[] coverData = fb2MetadataExtractor.extractCover(fb2File);
 
             if (coverData == null || coverData.length == 0) {
-                log.warn("No cover image found in FB2 '{}'", bookEntity.getPrimaryBookFile().getFileName());
+                log.warn("No cover image found in FB2 '{}'", bookFile.getFileName());
                 return false;
             }
 
@@ -68,7 +76,7 @@ public class Fb2Processor extends AbstractFileProcessor implements BookFileProce
             return saved;
 
         } catch (Exception e) {
-            log.error("Error generating cover for FB2 '{}': {}", bookEntity.getPrimaryBookFile().getFileName(), e.getMessage(), e);
+            log.error("Error generating cover for FB2 '{}': {}", bookFile.getFileName(), e.getMessage(), e);
             return false;
         }
     }

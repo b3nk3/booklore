@@ -8,14 +8,15 @@ import org.booklore.model.dto.request.TaskCreateRequest;
 import org.booklore.model.dto.response.CronConfig;
 import org.booklore.model.dto.response.TaskCreateResponse;
 import org.booklore.model.enums.TaskType;
-import org.booklore.task.tasks.Task;
 import org.booklore.task.TaskCancellationManager;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.booklore.task.TaskStatus;
+import org.booklore.task.tasks.Task;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.TaskScheduler;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
@@ -197,7 +198,7 @@ class TaskServiceTest {
         TaskCreateResponse resp = taskService.runAsUser(req);
 
         assertEquals(asyncType, resp.getTaskType());
-        assertEquals(org.booklore.task.TaskStatus.ACCEPTED, resp.getStatus());
+        assertEquals(TaskStatus.ACCEPTED, resp.getStatus());
     }
 
     @Test

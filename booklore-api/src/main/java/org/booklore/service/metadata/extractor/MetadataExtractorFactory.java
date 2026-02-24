@@ -40,7 +40,7 @@ public class MetadataExtractorFactory {
             case FB2 -> fb2MetadataExtractor.extractMetadata(file);
             case MOBI -> mobiMetadataExtractor.extractMetadata(file);
             case AZW3, AZW -> azw3MetadataExtractor.extractMetadata(file);
-            case M4B, M4A, MP3, AAC, FLAC, OPUS, OGG -> audiobookMetadataExtractor.extractMetadata(file);
+            case M4B, M4A, MP3 -> audiobookMetadataExtractor.extractMetadata(file);
         };
     }
 
@@ -52,7 +52,19 @@ public class MetadataExtractorFactory {
             case FB2 -> fb2MetadataExtractor.extractCover(file);
             case MOBI -> mobiMetadataExtractor.extractCover(file);
             case AZW3, AZW -> azw3MetadataExtractor.extractCover(file);
-            case M4B, M4A, MP3, AAC, FLAC, OPUS, OGG -> audiobookMetadataExtractor.extractCover(file);
+            case M4B, M4A, MP3 -> audiobookMetadataExtractor.extractCover(file);
+        };
+    }
+
+    public FileMetadataExtractor getExtractor(BookFileType bookFileType) {
+        return switch (bookFileType) {
+            case PDF -> pdfMetadataExtractor;
+            case EPUB -> epubMetadataExtractor;
+            case CBX -> cbxMetadataExtractor;
+            case FB2 -> fb2MetadataExtractor;
+            case MOBI -> mobiMetadataExtractor;
+            case AZW3 -> azw3MetadataExtractor;
+            case AUDIOBOOK -> audiobookMetadataExtractor;
         };
     }
 }

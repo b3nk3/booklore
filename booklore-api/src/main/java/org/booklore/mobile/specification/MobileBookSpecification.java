@@ -1,6 +1,7 @@
 package org.booklore.mobile.specification;
 
 import org.booklore.model.entity.*;
+import org.booklore.model.enums.BookFileType;
 import org.booklore.model.enums.ReadStatus;
 import jakarta.persistence.criteria.*;
 import org.springframework.data.jpa.domain.Specification;
@@ -116,6 +117,116 @@ public class MobileBookSpecification {
                 cb.isNull(root.get("isPhysical")),
                 cb.equal(root.get("isPhysical"), false)
         );
+    }
+
+    public static Specification<BookEntity> hasAudiobookFile() {
+        return (root, query, cb) -> {
+            Subquery<Long> subquery = query.subquery(Long.class);
+            Root<BookFileEntity> bookFileRoot = subquery.from(BookFileEntity.class);
+            subquery.select(bookFileRoot.get("book").get("id"))
+                    .where(cb.equal(bookFileRoot.get("bookType"), BookFileType.AUDIOBOOK));
+            return root.get("id").in(subquery);
+        };
+    }
+
+    public static Specification<BookEntity> hasNonAudiobookFile() {
+        return (root, query, cb) -> {
+            Subquery<Long> subquery = query.subquery(Long.class);
+            Root<BookFileEntity> bookFileRoot = subquery.from(BookFileEntity.class);
+            subquery.select(bookFileRoot.get("book").get("id"))
+                    .where(cb.notEqual(bookFileRoot.get("bookType"), BookFileType.AUDIOBOOK));
+            return root.get("id").in(subquery);
+        };
+    }
+
+    /**
+     * Filter books that have at least one file of the given type.
+     */
+    public static Specification<BookEntity> withFileType(BookFileType fileType) {
+        return (root, query, cb) -> {
+            if (fileType == null) {
+                return cb.conjunction();
+            }
+            Subquery<Long> subquery = query.subquery(Long.class);
+            Root<BookFileEntity> bookFileRoot = subquery.from(BookFileEntity.class);
+            subquery.select(bookFileRoot.get("book").get("id"))
+                    .where(cb.equal(bookFileRoot.get("bookType"), fileType));
+            return root.get("id").in(subquery);
+        };
+    }
+
+    /**
+     * Filter books where the user's personal rating is >= minRating.
+     */
+    public static Specification<BookEntity> withMinRating(int minRating, Long userId) {
+        return (root, query, cb) -> {
+            Subquery<Long> subquery = query.subquery(Long.class);
+            Root<UserBookProgressEntity> progressRoot = subquery.from(UserBookProgressEntity.class);
+            subquery.select(progressRoot.get("book").get("id"))
+                    .where(
+                            cb.equal(progressRoot.get("user").get("id"), userId),
+                            cb.greaterThanOrEqualTo(progressRoot.get("personalRating"), minRating)
+                    );
+            return root.get("id").in(subquery);
+        };
+    }
+
+    /**
+     * Filter books where the user's personal rating is <= maxRating.
+     * Use maxRating=0 to find unrated books.
+     */
+    public static Specification<BookEntity> withMaxRating(int maxRating, Long userId) {
+        return (root, query, cb) -> {
+            Subquery<Long> subquery = query.subquery(Long.class);
+            Root<UserBookProgressEntity> progressRoot = subquery.from(UserBookProgressEntity.class);
+
+            if (maxRating == 0) {
+                // Unrated: books with no progress entry or null personalRating
+                Subquery<Long> ratedSubquery = query.subquery(Long.class);
+                Root<UserBookProgressEntity> ratedRoot = ratedSubquery.from(UserBookProgressEntity.class);
+                ratedSubquery.select(ratedRoot.get("book").get("id"))
+                        .where(
+                                cb.equal(ratedRoot.get("user").get("id"), userId),
+                                cb.isNotNull(ratedRoot.get("personalRating"))
+                        );
+                return cb.not(root.get("id").in(ratedSubquery));
+            }
+
+            subquery.select(progressRoot.get("book").get("id"))
+                    .where(
+                            cb.equal(progressRoot.get("user").get("id"), userId),
+                            cb.lessThanOrEqualTo(progressRoot.get("personalRating"), maxRating)
+                    );
+            return root.get("id").in(subquery);
+        };
+    }
+
+    /**
+     * Filter books by author name (case-insensitive exact match).
+     */
+    public static Specification<BookEntity> withAuthor(String authorName) {
+        return (root, query, cb) -> {
+            if (authorName == null || authorName.trim().isEmpty()) {
+                return cb.conjunction();
+            }
+            Join<BookEntity, BookMetadataEntity> metadataJoin = root.join("metadata", JoinType.LEFT);
+            Join<BookMetadataEntity, AuthorEntity> authorsJoin = metadataJoin.join("authors", JoinType.LEFT);
+            query.distinct(true);
+            return cb.equal(cb.lower(authorsJoin.get("name")), authorName.toLowerCase().trim());
+        };
+    }
+
+    /**
+     * Filter books by language code (case-insensitive).
+     */
+    public static Specification<BookEntity> withLanguage(String language) {
+        return (root, query, cb) -> {
+            if (language == null || language.trim().isEmpty()) {
+                return cb.conjunction();
+            }
+            Join<BookEntity, BookMetadataEntity> metadataJoin = root.join("metadata", JoinType.LEFT);
+            return cb.equal(cb.lower(metadataJoin.get("language")), language.toLowerCase().trim());
+        };
     }
 
     @SafeVarargs

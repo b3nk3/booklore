@@ -1,5 +1,8 @@
 package org.booklore.service.library;
 
+import jakarta.transaction.Transactional;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.booklore.config.security.service.AuthenticationService;
 import org.booklore.exception.ApiError;
 import org.booklore.mapper.BookMapper;
@@ -13,6 +16,7 @@ import org.booklore.model.entity.BookEntity;
 import org.booklore.model.entity.BookLoreUserEntity;
 import org.booklore.model.entity.LibraryEntity;
 import org.booklore.model.entity.LibraryPathEntity;
+import org.booklore.model.enums.AuditAction;
 import org.booklore.model.enums.BookFileType;
 import org.booklore.model.websocket.Topic;
 import org.booklore.repository.BookRepository;
@@ -24,10 +28,9 @@ import org.booklore.service.monitoring.MonitoringService;
 import org.booklore.task.options.RescanLibraryContext;
 import org.booklore.util.FileService;
 import org.booklore.util.SecurityContextVirtualThread;
-import jakarta.annotation.PostConstruct;
-import jakarta.transaction.Transactional;
-import lombok.AllArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
+import org.springframework.context.event.EventListener;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
@@ -37,16 +40,27 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import org.booklore.service.audit.AuditService;
 
 @Slf4j
 @Service
 @AllArgsConstructor
+@DependsOnDatabaseInitialization
 public class LibraryService {
+
+    private static final Set<Long> scanningLibraries = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Checks whether a library is currently being scanned.
+     * Can be used by other components (e.g., file watcher) to avoid processing
+     * files while a full scan is in progress.
+     */
+    public static boolean isLibraryScanning(long libraryId) {
+        return scanningLibraries.contains(libraryId);
+    }
 
     private final LibraryRepository libraryRepository;
     private final LibraryPathRepository libraryPathRepository;
@@ -59,9 +73,10 @@ public class LibraryService {
     private final MonitoringService monitoringService;
     private final AuthenticationService authenticationService;
     private final UserRepository userRepository;
+    private final AuditService auditService;
 
     @Transactional
-    @PostConstruct
+    @EventListener(ApplicationReadyEvent.class)
     public void initializeMonitoring() {
         List<Library> libraries = libraryRepository.findAll().stream().map(libraryMapper::toLibrary).collect(Collectors.toList());
         monitoringService.registerLibraries(libraries);
@@ -77,6 +92,10 @@ public class LibraryService {
         library.setIconType(request.getIconType());
         library.setWatch(request.isWatch());
         library.setFormatPriority(request.getFormatPriority());
+        library.setAllowedFormats(request.getAllowedFormats());
+        if (request.getMetadataSource() != null) {
+            library.setMetadataSource(request.getMetadataSource());
+        }
 
         Set<String> currentPaths = library.getLibraryPaths().stream()
                 .map(LibraryPathEntity::getPath)
@@ -127,15 +146,22 @@ public class LibraryService {
 
         if (!newPaths.isEmpty()) {
             SecurityContextVirtualThread.runWithSecurityContext(() -> {
+                if (!scanningLibraries.add(libraryId)) {
+                    log.warn("Library {} is already being scanned, skipping duplicate process request", libraryId);
+                    return;
+                }
                 try {
                     libraryProcessingService.processLibrary(libraryId);
                 } catch (InvalidDataAccessApiUsageException e) {
                     log.debug("InvalidDataAccessApiUsageException - Library id: {}", libraryId);
+                } finally {
+                    scanningLibraries.remove(libraryId);
                 }
                 log.info("Parsing task completed!");
             });
         }
 
+        auditService.log(AuditAction.LIBRARY_UPDATED, "Library", libraryId, "Updated library: " + library.getName());
         return libraryMapper.toLibrary(savedLibrary);
     }
 
@@ -156,6 +182,8 @@ public class LibraryService {
                 .iconType(request.getIconType())
                 .watch(request.isWatch())
                 .formatPriority(request.getFormatPriority())
+                .allowedFormats(request.getAllowedFormats())
+                .metadataSource(request.getMetadataSource())
                 .users(List.of(user.get()))
                 .build();
 
@@ -170,21 +198,33 @@ public class LibraryService {
         }
 
         SecurityContextVirtualThread.runWithSecurityContext(() -> {
+            if (!scanningLibraries.add(libraryId)) {
+                log.warn("Library {} is already being scanned, skipping duplicate process request", libraryId);
+                return;
+            }
             try {
                 libraryProcessingService.processLibrary(libraryId);
             } catch (InvalidDataAccessApiUsageException e) {
                 log.debug("InvalidDataAccessApiUsageException - Library id: {}", libraryId);
+            } finally {
+                scanningLibraries.remove(libraryId);
             }
             log.info("Parsing task completed!");
         });
 
+        auditService.log(AuditAction.LIBRARY_CREATED, "Library", libraryEntity.getId(), "Created library: " + libraryEntity.getName());
         return libraryMapper.toLibrary(libraryEntity);
     }
 
     public void rescanLibrary(long libraryId) {
-        libraryRepository.findById(libraryId).orElseThrow(() -> ApiError.LIBRARY_NOT_FOUND.createException(libraryId));
+        LibraryEntity lib = libraryRepository.findById(libraryId).orElseThrow(() -> ApiError.LIBRARY_NOT_FOUND.createException(libraryId));
+        auditService.log(AuditAction.LIBRARY_SCANNED, "Library", libraryId, "Scanned library: " + lib.getName());
 
         SecurityContextVirtualThread.runWithSecurityContext(() -> {
+            if (!scanningLibraries.add(libraryId)) {
+                log.warn("Library {} is already being scanned, skipping duplicate rescan request", libraryId);
+                return;
+            }
             try {
                 RescanLibraryContext context = RescanLibraryContext.builder()
                         .libraryId(libraryId)
@@ -194,6 +234,8 @@ public class LibraryService {
                 log.debug("InvalidDataAccessApiUsageException - Library id: {}", libraryId);
             } catch (IOException e) {
                 log.error("Error while parsing library books", e);
+            } finally {
+                scanningLibraries.remove(libraryId);
             }
             log.info("Parsing task completed!");
         });
@@ -222,15 +264,16 @@ public class LibraryService {
         return libraries.stream().map(libraryMapper::toLibrary).toList();
     }
 
+    @Transactional
     public void deleteLibrary(long id) {
-        LibraryEntity library = libraryRepository.findById(id).orElseThrow(() -> ApiError.LIBRARY_NOT_FOUND.createException(id));
-        library.getLibraryPaths().forEach(libraryPath -> {
-            Path path = Paths.get(libraryPath.getPath());
-            monitoringService.unregisterLibrary(id);
-        });
+        LibraryEntity library = libraryRepository.findById(id)
+                .orElseThrow(() -> ApiError.LIBRARY_NOT_FOUND.createException(id));
+        monitoringService.unregisterLibrary(id);
         Set<Long> bookIds = library.getBookEntities().stream().map(BookEntity::getId).collect(Collectors.toSet());
         fileService.deleteBookCovers(bookIds);
+        String libraryName = library.getName();
         libraryRepository.deleteById(id);
+        auditService.log(AuditAction.LIBRARY_DELETED, "Library", id, "Deleted library: " + libraryName);
         log.info("Library deleted successfully: {}", id);
     }
 
@@ -249,7 +292,21 @@ public class LibraryService {
     public Library setFileNamingPattern(long libraryId, String pattern) {
         LibraryEntity library = libraryRepository.findById(libraryId).orElseThrow(() -> ApiError.LIBRARY_NOT_FOUND.createException(libraryId));
         library.setFileNamingPattern(pattern);
-        return libraryMapper.toLibrary(libraryRepository.save(library));
+        Library result = libraryMapper.toLibrary(libraryRepository.save(library));
+        auditService.log(AuditAction.NAMING_PATTERN_CHANGED, "Library", libraryId, "Changed naming pattern for library: " + library.getName() + " to: " + pattern);
+        return result;
+    }
+
+    public Map<String, Long> getBookCountsByFormat(long libraryId) {
+        libraryRepository.findById(libraryId).orElseThrow(() -> ApiError.LIBRARY_NOT_FOUND.createException(libraryId));
+        Map<String, Long> counts = new HashMap<>();
+        for (BookFileType type : BookFileType.values()) {
+            long count = bookRepository.countByLibraryIdAndBookType(libraryId, type);
+            if (count > 0) {
+                counts.put(type.name(), count);
+            }
+        }
+        return counts;
     }
 
     public int scanLibraryPaths(CreateLibraryRequest request) {
@@ -257,6 +314,9 @@ public class LibraryService {
         if (request.getPaths() == null || request.getPaths().isEmpty()) {
             return count;
         }
+        Set<BookFileType> allowedFormats = request.getAllowedFormats() != null && !request.getAllowedFormats().isEmpty()
+                ? Set.copyOf(request.getAllowedFormats())
+                : null;
         for (LibraryPath libraryPath : request.getPaths()) {
             Path path = Paths.get(libraryPath.getPath());
             if (!Files.exists(path)) {
@@ -264,21 +324,21 @@ public class LibraryService {
                 continue;
             }
             if (Files.isDirectory(path)) {
-                count += scanDirectory(path);
-            } else if (Files.isRegularFile(path) && isProcessableFile(path)) {
+                count += scanDirectory(path, allowedFormats);
+            } else if (Files.isRegularFile(path) && isProcessableFile(path, allowedFormats)) {
                 count++;
             }
         }
         return count;
     }
 
-    private int scanDirectory(Path directory) {
+    private int scanDirectory(Path directory, Set<BookFileType> allowedFormats) {
         int count = 0;
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
             for (Path entry : stream) {
                 if (Files.isDirectory(entry)) {
-                    count += scanDirectory(entry);
-                } else if (Files.isRegularFile(entry) && isProcessableFile(entry)) {
+                    count += scanDirectory(entry, allowedFormats);
+                } else if (Files.isRegularFile(entry) && isProcessableFile(entry, allowedFormats)) {
                     count++;
                 }
             }
@@ -288,11 +348,16 @@ public class LibraryService {
         return count;
     }
 
-    private boolean isProcessableFile(Path file) {
+    private boolean isProcessableFile(Path file, Set<BookFileType> allowedFormats) {
         String fileName = file.getFileName().toString().toLowerCase();
         for (BookFileType fileType : BookFileType.values()) {
-            if (fileName.endsWith("." + fileType.name().toLowerCase())) {
-                return true;
+            if (allowedFormats != null && !allowedFormats.contains(fileType)) {
+                continue;
+            }
+            for (String ext : fileType.getExtensions()) {
+                if (fileName.endsWith("." + ext)) {
+                    return true;
+                }
             }
         }
         return false;

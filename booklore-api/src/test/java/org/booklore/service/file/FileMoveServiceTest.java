@@ -1,5 +1,6 @@
 package org.booklore.service.file;
 
+import jakarta.persistence.EntityManager;
 import org.booklore.config.AppProperties;
 import org.booklore.mapper.BookMapper;
 import org.booklore.mapper.LibraryMapper;
@@ -16,8 +17,8 @@ import org.booklore.repository.BookAdditionalFileRepository;
 import org.booklore.repository.BookRepository;
 import org.booklore.repository.LibraryRepository;
 import org.booklore.service.NotificationService;
+import org.booklore.service.metadata.sidecar.SidecarMetadataWriter;
 import org.booklore.service.monitoring.MonitoringRegistrationService;
-import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -31,11 +32,7 @@ import org.mockito.quality.Strictness;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -55,6 +52,8 @@ class FileMoveServiceTest {
     @Mock private BookMapper bookMapper;
     @Mock private NotificationService notificationService;
     @Mock private EntityManager entityManager;
+    @Mock private org.springframework.transaction.support.TransactionTemplate transactionTemplate;
+    @Mock private SidecarMetadataWriter sidecarMetadataWriter;
 
     private FileMoveService service;
     private LibraryEntity library;
@@ -64,9 +63,11 @@ class FileMoveServiceTest {
         TestableFileMoveService(AppProperties appProperties, BookRepository bookRepository, BookAdditionalFileRepository bookFileRepository,
                                 LibraryRepository libraryRepository, FileMoveHelper fileMoveHelper,
                                 MonitoringRegistrationService monitoringRegistrationService, LibraryMapper libraryMapper,
-                                BookMapper bookMapper, NotificationService notificationService, EntityManager entityManager) {
+                                BookMapper bookMapper, NotificationService notificationService, EntityManager entityManager,
+                                org.springframework.transaction.support.TransactionTemplate transactionTemplate,
+                                SidecarMetadataWriter sidecarMetadataWriter) {
             super(appProperties, bookRepository, bookFileRepository, libraryRepository, fileMoveHelper,
-                    monitoringRegistrationService, libraryMapper, bookMapper, notificationService, entityManager);
+                    monitoringRegistrationService, libraryMapper, bookMapper, notificationService, entityManager, transactionTemplate, sidecarMetadataWriter);
         }
 
         @Override
@@ -78,8 +79,16 @@ class FileMoveServiceTest {
     @BeforeEach
     void setUp() {
         when(appProperties.getDiskType()).thenReturn("LOCAL");
+        
+        // Mock simple execution for transaction template
+        doAnswer(invocation -> {
+            java.util.function.Consumer<org.springframework.transaction.TransactionStatus> action = invocation.getArgument(0);
+            action.accept(null);
+            return null;
+        }).when(transactionTemplate).executeWithoutResult(any());
+
         service = spy(new TestableFileMoveService(appProperties, bookRepository, bookFileRepository, libraryRepository,
-                fileMoveHelper, monitoringRegistrationService, libraryMapper, bookMapper, notificationService, entityManager));
+                fileMoveHelper, monitoringRegistrationService, libraryMapper, bookMapper, notificationService, entityManager, transactionTemplate, sidecarMetadataWriter));
 
         library = new LibraryEntity();
         library.setId(1L);

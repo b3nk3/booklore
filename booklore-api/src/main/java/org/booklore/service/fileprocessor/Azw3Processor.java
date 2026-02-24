@@ -4,6 +4,7 @@ import org.booklore.mapper.BookMapper;
 import org.booklore.model.dto.BookMetadata;
 import org.booklore.model.dto.settings.LibraryFile;
 import org.booklore.model.entity.BookEntity;
+import org.booklore.model.entity.BookFileEntity;
 import org.booklore.model.entity.BookMetadataEntity;
 import org.booklore.model.enums.BookFileType;
 import org.booklore.repository.BookAdditionalFileRepository;
@@ -11,6 +12,7 @@ import org.booklore.repository.BookRepository;
 import org.booklore.service.book.BookCreatorService;
 import org.booklore.service.metadata.MetadataMatchService;
 import org.booklore.service.metadata.extractor.Azw3MetadataExtractor;
+import org.booklore.service.metadata.sidecar.SidecarMetadataWriter;
 import org.booklore.util.BookCoverUtils;
 import org.booklore.util.FileService;
 import org.booklore.util.FileUtils;
@@ -37,8 +39,9 @@ public class Azw3Processor extends AbstractFileProcessor implements BookFileProc
                          BookMapper bookMapper,
                          FileService fileService,
                          MetadataMatchService metadataMatchService,
+                         SidecarMetadataWriter sidecarMetadataWriter,
                          Azw3MetadataExtractor azw3MetadataExtractor) {
-        super(bookRepository, bookAdditionalFileRepository, bookCreatorService, bookMapper, fileService, metadataMatchService);
+        super(bookRepository, bookAdditionalFileRepository, bookCreatorService, bookMapper, fileService, metadataMatchService, sidecarMetadataWriter);
         this.azw3MetadataExtractor = azw3MetadataExtractor;
     }
 
@@ -56,19 +59,24 @@ public class Azw3Processor extends AbstractFileProcessor implements BookFileProc
 
     @Override
     public boolean generateCover(BookEntity bookEntity) {
+        return generateCover(bookEntity, bookEntity.getPrimaryBookFile());
+    }
+
+    @Override
+    public boolean generateCover(BookEntity bookEntity, BookFileEntity bookFile) {
         try {
-            File azw3File = new File(FileUtils.getBookFullPath(bookEntity));
+            File azw3File = new File(FileUtils.getBookFullPath(bookEntity, bookFile));
             byte[] coverData = azw3MetadataExtractor.extractCover(azw3File);
 
             if (coverData == null || coverData.length == 0) {
-                log.warn("No cover image found in AZW3 '{}'", bookEntity.getPrimaryBookFile());
+                log.warn("No cover image found in AZW3 '{}'", bookFile.getFileName());
                 return false;
             }
 
             return saveCoverImage(coverData, bookEntity.getId());
 
         } catch (Exception e) {
-            log.error("Error generating cover for AZW3 '{}': {}", bookEntity.getPrimaryBookFile(), e.getMessage(), e);
+            log.error("Error generating cover for AZW3 '{}': {}", bookFile.getFileName(), e.getMessage(), e);
             return false;
         }
     }

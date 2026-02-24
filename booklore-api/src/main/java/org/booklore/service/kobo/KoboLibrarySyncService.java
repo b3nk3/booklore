@@ -1,26 +1,25 @@
 package org.booklore.service.kobo;
 
+import jakarta.servlet.http.HttpServletRequest;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.booklore.model.dto.BookLoreUser;
 import org.booklore.model.dto.BookloreSyncToken;
 import org.booklore.model.dto.kobo.*;
-import org.booklore.model.entity.KoboSnapshotBookEntity;
 import org.booklore.model.entity.KoboLibrarySnapshotEntity;
+import org.booklore.model.entity.KoboSnapshotBookEntity;
 import org.booklore.model.entity.UserBookProgressEntity;
 import org.booklore.repository.KoboDeletedBookProgressRepository;
 import org.booklore.repository.UserBookProgressRepository;
 import org.booklore.util.RequestUtils;
 import org.booklore.util.kobo.BookloreSyncTokenGenerator;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.AllArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import jakarta.servlet.http.HttpServletRequest;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.util.*;
@@ -38,6 +37,7 @@ public class KoboLibrarySyncService {
     private final UserBookProgressRepository userBookProgressRepository;
     private final KoboServerProxy koboServerProxy;
     private final ObjectMapper objectMapper;
+    private final KoboSettingsService koboSettingsService;
 
     @Transactional
     public ResponseEntity<?> syncLibrary(BookLoreUser user, String token) {
@@ -88,6 +88,7 @@ public class KoboLibrarySyncService {
 
             if (!shouldContinueSync) {
                 entitlements.addAll(syncReadingStatesToKobo(user.getId(), currSnapshot.getId()));
+                entitlements.addAll(entitlementService.generateTags());
             }
         } else {
             int maxRemaining = 5;
@@ -104,6 +105,7 @@ public class KoboLibrarySyncService {
 
             if (!shouldContinueSync) {
                 entitlements.addAll(syncReadingStatesToKobo(user.getId(), currSnapshot.getId()));
+                entitlements.addAll(entitlementService.generateTags());
             }
         }
 
@@ -161,6 +163,12 @@ public class KoboLibrarySyncService {
         List<UserBookProgressEntity> booksNeedingSync =
                 userBookProgressRepository.findAllBooksNeedingKoboSync(userId, snapshotId);
 
+        if (!koboSettingsService.getCurrentUserSettings().isTwoWayProgressSync()) {
+            booksNeedingSync = booksNeedingSync.stream()
+                    .filter(p -> needsStatusSync(p) || needsKoboProgressSync(p))
+                    .toList();
+        }
+
         if (booksNeedingSync.isEmpty()) {
             return Collections.emptyList();
         }
@@ -191,12 +199,26 @@ public class KoboLibrarySyncService {
         return sentTime == null || modifiedTime.isAfter(sentTime);
     }
 
-    private boolean needsProgressSync(UserBookProgressEntity progress) {
-        Instant receivedTime = progress.getKoboProgressReceivedTime();
-        if (receivedTime == null) {
-            return false;
-        }
+    private boolean needsKoboProgressSync(UserBookProgressEntity progress) {
         Instant sentTime = progress.getKoboProgressSentTime();
-        return sentTime == null || receivedTime.isAfter(sentTime);
+        Instant receivedTime = progress.getKoboProgressReceivedTime();
+        return receivedTime != null && (sentTime == null || receivedTime.isAfter(sentTime));
+    }
+
+    private boolean needsProgressSync(UserBookProgressEntity progress) {
+        if (needsKoboProgressSync(progress)) {
+            return true;
+        }
+
+        if (koboSettingsService.getCurrentUserSettings().isTwoWayProgressSync()
+                && progress.getEpubProgress() != null && progress.getEpubProgressPercent() != null) {
+            Instant sentTime = progress.getKoboProgressSentTime();
+            Instant lastReadTime = progress.getLastReadTime();
+            if (lastReadTime != null && (sentTime == null || lastReadTime.isAfter(sentTime))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
